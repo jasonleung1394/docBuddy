@@ -1,0 +1,5 @@
+fastapi
+uvicorn
+pymupdf
+docxtpl
+python-multipart  # for file uploads
