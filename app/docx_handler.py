@@ -1,33 +1,28 @@
+import os, tempfile
+from fastapi.responses import FileResponse
 from docxtpl import DocxTemplate
-from fastapi.responses import StreamingResponse
-from io import BytesIO
-import tempfile
-from starlette.datastructures import UploadFile
 
-async def process_docx(file: UploadFile, replacements: dict):
-    # read the uploaded file bytes and grab its original filename
-    docx_bytes = await file.read()
-    input_filename = file.filename
+async def process_docx(file, replacements: dict):
+    # Save upload to a temp file
+    in_tmp = tempfile.NamedTemporaryFile(suffix=".docx", delete=False)
+    try:
+        in_bytes = await file.read()
+        in_tmp.write(in_bytes)
+        in_tmp.flush()
+        in_tmp.close()  # important on Windows before opening with DocxTemplate
 
-    # drop into a temp file so docxtpl can load it
-    with tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as tmp:
-        tmp.write(docx_bytes)
-        tmp.flush()
-        tpl = DocxTemplate(tmp.name)
+        # Render to another temp file on disk (easier to debug than BytesIO)
+        out_path = tempfile.mktemp(suffix=".docx")
+        tpl = DocxTemplate(in_tmp.name)
         tpl.render(replacements)
+        tpl.save(out_path)
 
-        # write out to an in‑memory buffer
-        output_io = BytesIO()
-        tpl.save(output_io)
-        output_io.seek(0)
-
-    # use the original filename in the Content-Disposition header
-    headers = {
-        "Content-Disposition": f'inline; filename="{input_filename}"'
-    }
-
-    return StreamingResponse(
-        output_io,
-        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        headers=headers
-    )
+        # Return as a real file so you can download and open it
+        return FileResponse(
+            out_path,
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            filename=file.filename or "output.docx",
+        )
+    finally:
+        try: os.unlink(in_tmp.name)
+        except OSError: pass
